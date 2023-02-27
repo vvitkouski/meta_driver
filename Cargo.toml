@@ -1,0 +1,26 @@
+[package]
+name = "meta_driver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[env.development]
+TARGET_PATH = "target/x86_64-pc-windows-msvc/debug"
+
+[env.production]
+TARGET_PATH = "target/x86_64-pc-windows-msvc/release"
+BUILD_RELEASE = "--release"

@@ -1,0 +1,24 @@
+[env]
+VC_BUILD_DIR="D:\\Program Files\\MVS\\VC\\Auxiliary\\Build\\vcvars64.bat"
+
+[env.development]
+TARGET_PATH = "target/x86_64-pc-windows-msvc/debug"
+
+[env.production]
+TARGET_PATH = "target/x86_64-pc-windows-msvc/release"
+BUILD_RELEASE = "--release"
+
+[tasks.build-driver]
+script = '''
+cargo b %BUILD_FLAGS%
+'''
+
+[tasks.rename]
+ignore_errors = true
+script = '''
+cd %TARGET_PATH%
+rename meta_driver.dll meta_driver.sys
+'''
+
+[tasks.sign]
+dependencies = ["build-driver", "rename"]

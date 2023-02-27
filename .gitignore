@@ -1,0 +1,6 @@
+/target
+/Cargo.lock
+
+# Workspace and project files are user-specific
+*.sublime-workspace
+*.sublime-project
