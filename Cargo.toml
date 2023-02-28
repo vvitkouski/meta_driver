@@ -11,6 +11,17 @@ crate-type = ["cdylib"]
 
 [dependencies]
 
+[dependencies.winapi]
+git = "https://github.com/Trantect/winapi-rs.git"
+branch = "feature/km"
+features = [
+    "wdm",
+    "ntstatus",
+]
+
+[build-dependencies]
+thiserror = "1.0"
+winreg = "0.10"
 
 [profile.dev]
 panic = "abort"

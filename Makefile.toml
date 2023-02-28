@@ -17,8 +17,13 @@ cargo b %BUILD_FLAGS%
 ignore_errors = true
 script = '''
 cd %TARGET_PATH%
+del /f meta_driver.sys
 rename meta_driver.dll meta_driver.sys
 '''
 
 [tasks.sign]
 dependencies = ["build-driver", "rename"]
+script = '''
+call "%VC_BUILD_DIR%"
+if not exist driver_cert.crt ( powershell -file sign.ps1 ) else ( echo Certificate already exists. )
+'''
