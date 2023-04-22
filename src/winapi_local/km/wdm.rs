@@ -10,7 +10,9 @@ use winapi::shared::ntdef::{
 	LUID,
 	ULONG,
 	BOOLEAN,
-	PVOID
+	PVOID,
+	KIRQL,
+	PKIRQL
 };
 use winapi::um::winnt::{
 	SECURITY_IMPERSONATION_LEVEL,
@@ -93,6 +95,32 @@ pub const DO_POWER_PAGABLE: u32 = 0x00002000;
 pub const DO_POWER_INRUSH: u32 = 0x00004000;
 pub const DO_DEVICE_TO_BE_RESET: u32 = 0x04000000;
 pub const DO_DAX_VOLUME: u32 = 0x10000000;
+
+//
+// Define IRQL levels
+//
+/// Passive release level
+pub const PASSIVE_LEVEL: KIRQL = 0;
+/// Lowest interrupt level
+pub const LOW_LEVEL: KIRQL = 0;
+/// APC interrupt level
+pub const APC_LEVEL: KIRQL = 1;
+/// Dispatcher level
+pub const DISPATCH_LEVEL: KIRQL = 2;
+/// CMCI interrupt level
+pub const CMCI_LEVEL: KIRQL = 5;
+/// Interval clock level
+pub const CLOCK_LEVEL: KIRQL = 13;
+/// Interprocessor interrupt level
+pub const IPI_LEVEL: KIRQL = 14;
+/// Deferred Recovery Service level
+pub const DRS_LEVEL: KIRQL = 14;
+/// Power failure level
+pub const POWER_LEVEL: KIRQL = 14;
+/// Timer used for profiling.
+pub const PROFILING_LEVEL: KIRQL = 15;
+/// Highest interrupt level
+pub const HIGH_LEVEL: KIRQL = 15;
 
 // ULONG_PTR & PULONG_PTR types
 #[allow(non_camel_case_types)]
@@ -189,16 +217,8 @@ pub type PACCESS_STATE = PVOID;
 
 // PUBLIC FUNCTIONS ==========================================
 
-// Create empty UNICODE_STRING
-pub fn zeroed_unicode_string() -> UNICODE_STRING {
-	UNICODE_STRING {
-        Length: 0u16,
-        MaximumLength: 0u16,
-        Buffer: core::ptr::null_mut()
-    }
-}
-
 // Import extern system functions and vars
+#[link(name = "ntoskrnl")]
 extern "system" {
 	pub fn RtlInitUnicodeString(
 		DestinationString: PUNICODE_STRING,
@@ -218,5 +238,25 @@ extern "system" {
 
 	pub fn ObDereferenceObject(a: PVOID);
 
+	pub fn KfRaiseIrql(new_irql: KIRQL) -> KIRQL;
+
+	pub fn KeLowerIrql(new_irql: KIRQL);
+
 	pub static mut IoDriverObjectType: *mut POBJECT_TYPE;
 }
+
+// Create empty UNICODE_STRING
+pub fn zeroed_unicode_string() -> UNICODE_STRING {
+	UNICODE_STRING {
+        Length: 0u16,
+        MaximumLength: 0u16,
+        Buffer: core::ptr::null_mut()
+    }
+}
+
+// KeRaiseIrql winapi macro
+#[allow(non_snake_case)]
+pub unsafe fn KeRaiseIrql(new_irql: KIRQL, old_irql: PKIRQL) {
+	*old_irql = KfRaiseIrql(new_irql);
+}
+

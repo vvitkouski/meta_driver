@@ -4,7 +4,10 @@
 // Immports
 use core::panic::PanicInfo;
 use winapi::shared::ntdef::{NTSTATUS, UNICODE_STRING, FALSE};
-use winapi::shared::ntstatus::STATUS_SUCCESS;
+use winapi::shared::ntstatus::{
+    STATUS_SUCCESS,
+    STATUS_INVALID_PARAMETER
+};
 use wchar::{wchz, wchar_t};
 use winapi::km::wdm::{
     DbgPrintEx,
@@ -13,6 +16,7 @@ use winapi::km::wdm::{
     IoCreateSymbolicLink,
     IoDeleteSymbolicLink,
     IoCompleteRequest,
+    IoGetCurrentIrpStackLocation,
     DRIVER_OBJECT,
     PDRIVER_OBJECT,
     DEVICE_TYPE,
@@ -20,7 +24,17 @@ use winapi::km::wdm::{
     PDEVICE_OBJECT,
     IRP,
     PIRP,
-    IO_PRIORITY
+    IO_PRIORITY,
+    PIO_STACK_LOCATION
+};
+pub use winapi::shared::minwindef::{
+    USHORT,
+    ULONG,
+    DWORD
+};
+pub use winapi::um::winioctl::{
+    METHOD_BUFFERED,
+    FILE_SPECIAL_ACCESS
 };
 use winapi_local::km::wdm::{
     zeroed_unicode_string,
@@ -36,16 +50,48 @@ use winapi_local::km::wdm::{
 use mouse::{
     zeroed_mouse_object,
     mouse_init,
-    PMOUSE_OBJECT
+    mouse_event,
+    MOUSE_OBJECT,
+    PMOUSE_OBJECT,
+    MOUSE_LEFT_BUTTON_DOWN,
+    MOUSE_LEFT_BUTTON_UP,
+    MOUSE_MOVE_ABSOLUTE
+};
+use keyboard::{
+    zeroed_kbd_object,
+    kbd_init,
+    KBD_OBJECT,
+    PKBD_OBJECT
 };
 
 // Constants
 const IO_DEVICE_NAME: &[wchar_t] = wchz!("\\Device\\MetaDriver");
 const IO_SYMLINK_NAME: &[wchar_t] = wchz!("\\??\\MetaDriver");
 
+// IRP CODES & OBJECTS
+pub const fn CTL_CODE(
+    DeviceType: DWORD,
+    Function: DWORD,
+    Method: DWORD,
+    Access: DWORD,
+) -> DWORD {
+    (DeviceType << 16) | (Access << 14) | (Function << 2) | Method
+}
+const META_IRP_MOUSE_EVENT: DWORD = CTL_CODE(DEVICE_TYPE::FILE_DEVICE_UNKNOWN as DWORD, 0xf9004, METHOD_BUFFERED, FILE_SPECIAL_ACCESS);
+
+pub struct MouseRequest {
+    x: u32,
+    y: u32,
+}
+pub type PMouseRequest = *mut MouseRequest;
+
 // Define modules
 pub mod winapi_local;
 pub mod mouse;
+pub mod keyboard;
+
+// Static mouse object
+static mut GLOBAL_MOUSE_OBJ: MOUSE_OBJECT = zeroed_mouse_object();
 
 // Temporary _fltused fix
 #[no_mangle]
@@ -104,22 +150,29 @@ pub extern "system" fn driver_entry(
         for func_idx in 0..IRP_MJ_MAXIMUM_FUNCTION {
             driver.MajorFunction[func_idx as usize] = Some(irp_mj_unsupported);
         }
+        
         driver.MajorFunction[IRP_MJ_CREATE] = Some(irp_mj_create);
         driver.MajorFunction[IRP_MJ_CLOSE] = Some(irp_mj_close);
         driver.MajorFunction[IRP_MJ_DEVICE_CONTROL] = Some(irp_mj_device_control);
+        
 
         // Set device flags
         (*device_obj_ptr).Flags |= DO_DIRECT_IO;
         (*device_obj_ptr).Flags &= !DO_DEVICE_INITIALIZING;
-        DbgPrintEx(0, 0, "FLAGS: %u\0".as_ptr(), (*device_obj_ptr).Flags);
-        // let mut device_obj: &mut DEVICE_OBJECT = &mut (*device_obj_ptr);
-        // device_obj.Flags |= DO_DIRECT_IO;
-        // device_obj.Flags &= !DO_DEVICE_INITIALIZING;
 
         // Init mouse
-        let mut mouse_object = zeroed_mouse_object();
-        let mouse_init_status = mouse_init(&mut mouse_object as PMOUSE_OBJECT);
+        let mouse_init_status = mouse_init(&mut GLOBAL_MOUSE_OBJ as PMOUSE_OBJECT);
         DbgPrintEx(0, 0, "mouse::mouse_init status: %u\0".as_ptr(), mouse_init_status);
+
+        // Init keyboard
+        let mut kbd_object = zeroed_kbd_object();
+        let kdb_init_status = kbd_init(&mut kbd_object as PKBD_OBJECT);
+        
+        // Test
+        // let mut flags: USHORT = 0;
+        // flags |= MOUSE_MOVE_ABSOLUTE;
+        // mouse_event(&mut GLOBAL_MOUSE_OBJ as PMOUSE_OBJECT, 10, 10, 0x0000, flags);
+        //DbgPrintEx(0, 0, "MOUSE POINTER: %p\0".as_ptr(), GLOBAL_MOUSE_OBJ_PTR);
     }
 
     // Assign unload function
@@ -138,8 +191,37 @@ pub unsafe extern "system" fn irp_mj_unsupported(device: &mut DEVICE_OBJECT, irp
 
 // I/O Request Package Major function - device_control
 pub unsafe extern "system" fn irp_mj_device_control(device: &mut DEVICE_OBJECT, irp: &mut IRP) -> NTSTATUS {
+    let mut status: NTSTATUS = STATUS_SUCCESS;
     DbgPrintEx(0, 0, "Device control IRP called.\0".as_ptr());
-    STATUS_SUCCESS
+
+    let io_stack_location_ptr: PIO_STACK_LOCATION = IoGetCurrentIrpStackLocation(irp as PIRP);
+    let io_control_code: ULONG = (*io_stack_location_ptr).Parameters.DeviceIoControl().IoControlCode;
+    DbgPrintEx(0, 0, "IRP_MJ_DEVICE_CONTROL>>IO control code: %u.\0".as_ptr(), io_control_code);
+    DbgPrintEx(0, 0, "IRP_MJ_DEVICE_CONTROL>>MouseEvent control code: %u.\0".as_ptr(), META_IRP_MOUSE_EVENT);
+
+    let mut bytes_io = 0;
+
+    if io_control_code == META_IRP_MOUSE_EVENT {
+        bytes_io = core::mem::size_of::<MouseRequest>();
+        let mouse_request: &MouseRequest = &(*(*irp.AssociatedIrp.SystemBuffer() as PMouseRequest));
+        /*let mut flags: USHORT = 0;
+        flags |= MOUSE_MOVE_ABSOLUTE;
+        mouse_event(GLOBAL_MOUSE_OBJ_PTR, mouse_request.x as _, mouse_request.y as _, 0x0000, flags);
+        DbgPrintEx(0, 0, "IRP_MJ_DEVICE_CONTROL>>x: %u.\0".as_ptr(), mouse_request.x);*/
+        let mut flags: USHORT = 0;
+        flags |= MOUSE_MOVE_ABSOLUTE;
+        mouse_event(&mut GLOBAL_MOUSE_OBJ as PMOUSE_OBJECT, mouse_request.x as _, mouse_request.y as _, 0x0000, flags);
+        //DbgPrintEx(0, 0, "!MOUSE POINTER: %p\0".as_ptr(), GLOBAL_MOUSE_OBJ_PTR);
+
+    }
+    
+    irp.IoStatus.Information = bytes_io;
+    let io_status = irp.IoStatus.__bindgen_anon_1.Status_mut();
+    *io_status = status;
+
+    IoCompleteRequest(irp as PIRP, IO_PRIORITY::IO_NO_INCREMENT);
+
+    status
 }
 
 // I/O Request Package Major function - create
